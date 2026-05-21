@@ -1,9 +1,11 @@
-import { useState } from "react";
 import dynamic from "next/dynamic";
 
-const MapComponent = dynamic(() => import("../src/MapComponent"), {
-  ssr: false,
-});
+const MapComponent = dynamic(
+  () => import("../src/MapComponent"),
+  {
+    ssr: false,
+  }
+);
 
 export default function Home() {
   return (
