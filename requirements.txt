@@ -6,6 +6,5 @@ numpy
 scipy
 geopandas
 shapely
+torch==2.3.1
 torch-geometric
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.1.0+cpu
