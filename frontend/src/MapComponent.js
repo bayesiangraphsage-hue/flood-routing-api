@@ -31,7 +31,7 @@ export default function MapComponent() {
   const getRoute = async () => {
     try {
       const response = await fetch(
-        "https://flood-routing-api-1.onrender.com/predict_route"
+        "https://flood-routing-api-1.onrender.com/predict_route",
         {
           method: "POST",
           headers: {
