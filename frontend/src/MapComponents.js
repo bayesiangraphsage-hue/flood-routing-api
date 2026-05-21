@@ -7,8 +7,6 @@ import {
   useMapEvents,
 } from "react-leaflet";
 
-import "leaflet/dist/leaflet.css";
-
 function ClickHandler({ setOrigin, setDestination, origin, destination }) {
   useMapEvents({
     click(e) {
