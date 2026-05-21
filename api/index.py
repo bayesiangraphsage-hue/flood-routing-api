@@ -506,9 +506,7 @@ def root():
 # =====================================================
 
 @app.post("/predict_route")
-def predict_route(
-    req: RouteRequest
-):
+def predict_route(req: RouteRequest):
 
     global CVAR_BETA
 
@@ -521,7 +519,17 @@ def predict_route(
         CVAR_BETA = req.risk
 
         # =================================
-        # REBUILD GRAPH
+        # VALIDATE DATA
+        # =================================
+
+        if nodes_gdf is None:
+            raise Exception("nodes_gdf not loaded")
+
+        if edges_gdf is None:
+            raise Exception("edges_gdf not loaded")
+
+        # =================================
+        # BUILD GRAPH
         # =================================
 
         R_dynamic = build_routing_graph(
@@ -529,7 +537,7 @@ def predict_route(
         )
 
         # =================================
-        # POINTS
+        # CONVERT POINTS
         # =================================
 
         orig_pt = gpd.GeoSeries(
@@ -586,8 +594,11 @@ def predict_route(
         if dest_node.endswith(".0"):
             dest_node = dest_node[:-2]
 
+        print("ORIGIN NODE:", orig_node)
+        print("DEST NODE:", dest_node)
+
         # =================================
-        # SHORTEST PATH
+        # COMPUTE ROUTE
         # =================================
 
         route_nodes = nx.shortest_path(
@@ -597,8 +608,10 @@ def predict_route(
             weight="planned_cost",
         )
 
+        print("ROUTE NODES:", route_nodes)
+
         # =================================
-        # ROUTE COORDS
+        # ROUTE COORDINATES
         # =================================
 
         route_coords = []
@@ -608,11 +621,14 @@ def predict_route(
             if n in osmid_to_latlon:
 
                 route_coords.append(
-                    osmid_to_latlon[n]
+                    [
+                        float(osmid_to_latlon[n][0]),
+                        float(osmid_to_latlon[n][1]),
+                    ]
                 )
 
         # =================================
-        # ANALYTICS
+        # ANALYTICS VARIABLES
         # =================================
 
         distance_km = 0.0
@@ -623,46 +639,60 @@ def predict_route(
 
         risk_edges = []
 
-        for i in range(
-            len(route_nodes) - 1
-        ):
+        # =================================
+        # LOOP THROUGH ROUTE EDGES
+        # =================================
+
+        for i in range(len(route_nodes) - 1):
 
             u = route_nodes[i]
 
             v = route_nodes[i + 1]
 
-            edge_data = (
-                R_dynamic.get_edge_data(
-                    u,
-                    v,
-                )
+            edge_data = R_dynamic.get_edge_data(
+                u,
+                v,
             )
 
-            if not edge_data:
+            if edge_data is None:
+
+                print(
+                    f"NO EDGE DATA: {u} -> {v}"
+                )
+
                 continue
 
-            edge_attrs = list(
-                edge_data.values()
-            )[0]
+            # =================================
+            # MULTIGRAPH SAFE ACCESS
+            # =================================
 
-            # =============================
+            first_key = list(edge_data.keys())[0]
+
+            edge_attrs = edge_data[first_key]
+
+            print("EDGE ATTRS:", edge_attrs)
+
+            # =================================
             # DISTANCE
-            # =============================
+            # =================================
 
             edge_length = float(
                 edge_attrs.get(
                     "length",
-                    0,
+                    100,
                 )
             )
+
+            if edge_length <= 0:
+                edge_length = 100
 
             distance_km += (
                 edge_length / 1000
             )
 
-            # =============================
+            # =================================
             # TRAVEL TIME
-            # =============================
+            # =================================
 
             edge_time = float(
                 edge_attrs.get(
@@ -671,18 +701,25 @@ def predict_route(
                 )
             )
 
+            # fallback if missing
+            if edge_time <= 0:
+
+                edge_time = (
+                    edge_length / 8.33
+                )
+
             estimated_time_min += (
                 edge_time / 60
             )
 
-            # =============================
+            # =================================
             # RISK
-            # =============================
+            # =================================
 
             penalty = float(
                 edge_attrs.get(
                     "planned_penalty",
-                    0,
+                    0.05,
                 )
             )
 
@@ -690,9 +727,9 @@ def predict_route(
                 penalty
             )
 
-            # =============================
-            # HIGH RISK
-            # =============================
+            # =================================
+            # HIGH RISK ROADS
+            # =================================
 
             if penalty > 0.2:
 
@@ -702,8 +739,22 @@ def predict_route(
                 ):
 
                     risk_edges.append([
-                        osmid_to_latlon[u],
-                        osmid_to_latlon[v],
+                        [
+                            float(
+                                osmid_to_latlon[u][0]
+                            ),
+                            float(
+                                osmid_to_latlon[u][1]
+                            ),
+                        ],
+                        [
+                            float(
+                                osmid_to_latlon[v][0]
+                            ),
+                            float(
+                                osmid_to_latlon[v][1]
+                            ),
+                        ],
                     ])
 
         # =================================
@@ -721,9 +772,9 @@ def predict_route(
             risk_score = 0.0
 
         print("===================================")
-        print("DISTANCE:", distance_km)
-        print("TIME:", estimated_time_min)
-        print("RISK:", risk_score)
+        print("DISTANCE KM:", distance_km)
+        print("TIME MIN:", estimated_time_min)
+        print("RISK SCORE:", risk_score)
         print("===================================")
 
         # =================================
@@ -738,25 +789,19 @@ def predict_route(
 
             "risk_edges": risk_edges,
 
-            "distance_km": float(
-                round(
-                    distance_km,
-                    2,
-                )
+            "distance_km": round(
+                float(distance_km),
+                2,
             ),
 
-            "estimated_time_min": float(
-                round(
-                    estimated_time_min,
-                    2,
-                )
+            "estimated_time_min": round(
+                float(estimated_time_min),
+                2,
             ),
 
-            "risk_score": float(
-                round(
-                    risk_score,
-                    3,
-                )
+            "risk_score": round(
+                float(risk_score),
+                3,
             ),
 
             "model_used": req.model,
@@ -776,6 +821,8 @@ def predict_route(
         )
 
     except Exception as e:
+
+        print("FULL ERROR:", str(e))
 
         raise HTTPException(
             status_code=500,
