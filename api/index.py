@@ -512,33 +512,23 @@ def predict_route(req: RouteRequest):
 
     try:
 
-        # =================================
-        # UPDATE CVAR
-        # =================================
+        # =========================================
+        # UPDATE RISK
+        # =========================================
 
         CVAR_BETA = req.risk
 
-        # =================================
-        # VALIDATE DATA
-        # =================================
-
-        if nodes_gdf is None:
-            raise Exception("nodes_gdf not loaded")
-
-        if edges_gdf is None:
-            raise Exception("edges_gdf not loaded")
-
-        # =================================
-        # BUILD GRAPH
-        # =================================
+        # =========================================
+        # BUILD DYNAMIC GRAPH
+        # =========================================
 
         R_dynamic = build_routing_graph(
             edges_gdf
         )
 
-        # =================================
-        # CONVERT POINTS
-        # =================================
+        # =========================================
+        # CONVERT INPUT POINTS
+        # =========================================
 
         orig_pt = gpd.GeoSeries(
             [
@@ -564,9 +554,9 @@ def predict_route(req: RouteRequest):
             nodes_gdf.crs
         ).iloc[0]
 
-        # =================================
-        # NEAREST NODES
-        # =================================
+        # =========================================
+        # NEAREST GRAPH NODES
+        # =========================================
 
         orig_idx = (
             nodes_gdf.geometry.distance(
@@ -594,12 +584,9 @@ def predict_route(req: RouteRequest):
         if dest_node.endswith(".0"):
             dest_node = dest_node[:-2]
 
-        print("ORIGIN NODE:", orig_node)
-        print("DEST NODE:", dest_node)
-
-        # =================================
-        # COMPUTE ROUTE
-        # =================================
+        # =========================================
+        # SAFE ROUTE
+        # =========================================
 
         route_nodes = nx.shortest_path(
             R_dynamic,
@@ -608,28 +595,26 @@ def predict_route(req: RouteRequest):
             weight="planned_cost",
         )
 
-        print("ROUTE NODES:", route_nodes)
-
-        # =================================
-        # ROUTE COORDINATES
-        # =================================
+        # =========================================
+        # ROUTE COORDS
+        # =========================================
 
         route_coords = []
 
-        for n in route_nodes:
+        for node_id in route_nodes:
 
-            if n in osmid_to_latlon:
+            if node_id in osmid_to_latlon:
 
-                route_coords.append(
-                    [
-                        float(osmid_to_latlon[n][0]),
-                        float(osmid_to_latlon[n][1]),
-                    ]
-                )
+                lat, lon = osmid_to_latlon[node_id]
 
-        # =================================
-        # ANALYTICS VARIABLES
-        # =================================
+                route_coords.append([
+                    float(lat),
+                    float(lon),
+                ])
+
+        # =========================================
+        # ANALYTICS
+        # =========================================
 
         distance_km = 0.0
 
@@ -637,11 +622,9 @@ def predict_route(req: RouteRequest):
 
         risk_values = []
 
-        risk_edges = []
-
-        # =================================
-        # LOOP THROUGH ROUTE EDGES
-        # =================================
+        # =========================================
+        # ROUTE ANALYTICS LOOP
+        # =========================================
 
         for i in range(len(route_nodes) - 1):
 
@@ -655,26 +638,17 @@ def predict_route(req: RouteRequest):
             )
 
             if edge_data is None:
-
-                print(
-                    f"NO EDGE DATA: {u} -> {v}"
-                )
-
                 continue
 
-            # =================================
-            # MULTIGRAPH SAFE ACCESS
-            # =================================
-
-            first_key = list(edge_data.keys())[0]
+            first_key = list(
+                edge_data.keys()
+            )[0]
 
             edge_attrs = edge_data[first_key]
 
-            print("EDGE ATTRS:", edge_attrs)
-
-            # =================================
+            # =====================================
             # DISTANCE
-            # =================================
+            # =====================================
 
             edge_length = float(
                 edge_attrs.get(
@@ -683,38 +657,28 @@ def predict_route(req: RouteRequest):
                 )
             )
 
-            if edge_length <= 0:
-                edge_length = 100
-
             distance_km += (
                 edge_length / 1000
             )
 
-            # =================================
+            # =====================================
             # TRAVEL TIME
-            # =================================
+            # =====================================
 
             edge_time = float(
                 edge_attrs.get(
                     "travel_time",
-                    0,
+                    edge_length / 8.33,
                 )
             )
-
-            # fallback if missing
-            if edge_time <= 0:
-
-                edge_time = (
-                    edge_length / 8.33
-                )
 
             estimated_time_min += (
                 edge_time / 60
             )
 
-            # =================================
-            # RISK
-            # =================================
+            # =====================================
+            # RISK SCORE
+            # =====================================
 
             penalty = float(
                 edge_attrs.get(
@@ -727,56 +691,9 @@ def predict_route(req: RouteRequest):
                 penalty
             )
 
-          # =================================
-# ALL FLOOD RISK ROADS
-# =================================
-
-risk_edges = []
-
-for edge_u, edge_v, edge_attr in R_dynamic.edges(data=True):
-
-    try:
-
-        edge_penalty = float(
-            edge_attr.get(
-                "planned_penalty",
-                0.0,
-            )
-        )
-
-        # show roads with moderate/high risk
-        if edge_penalty > 0.15:
-
-            if (
-                edge_u in osmid_to_latlon
-                and edge_v in osmid_to_latlon
-            ):
-
-                risk_edges.append([
-                    [
-                        float(
-                            osmid_to_latlon[edge_u][0]
-                        ),
-                        float(
-                            osmid_to_latlon[edge_u][1]
-                        ),
-                    ],
-                    [
-                        float(
-                            osmid_to_latlon[edge_v][0]
-                        ),
-                        float(
-                            osmid_to_latlon[edge_v][1]
-                        ),
-                    ],
-                ])
-
-    except:
-        continue
-
-        # =================================
+        # =========================================
         # FINAL RISK SCORE
-        # =================================
+        # =========================================
 
         if len(risk_values) > 0:
 
@@ -788,15 +705,83 @@ for edge_u, edge_v, edge_attr in R_dynamic.edges(data=True):
 
             risk_score = 0.0
 
+        # =========================================
+        # FLOOD RISK ROADS
+        # =========================================
+
+        risk_edges = []
+
+        for _, row in edges_gdf.iterrows():
+
+            try:
+
+                penalty = float(
+                    row.get(
+                        "pred_flood_penalty",
+                        0.0,
+                    )
+                )
+
+                uncertainty = float(
+                    row.get(
+                        "uncertainty",
+                        0.0,
+                    )
+                )
+
+                risk_value = (
+                    penalty + uncertainty
+                )
+
+                # =================================
+                # SHOW HIGHER RISK ROADS
+                # =================================
+
+                if risk_value > 0.15:
+
+                    geometry = row.geometry
+
+                    if geometry is None:
+                        continue
+
+                    if geometry.geom_type == "LineString":
+
+                        coords = list(
+                            geometry.coords
+                        )
+
+                        if len(coords) >= 2:
+
+                            latlngs = []
+
+                            for coord in coords:
+
+                                lon = coord[0]
+                                lat = coord[1]
+
+                                latlngs.append([
+                                    float(lat),
+                                    float(lon),
+                                ])
+
+                            risk_edges.append(
+                                latlngs
+                            )
+
+            except:
+                continue
+
         print("===================================")
-        print("DISTANCE KM:", distance_km)
-        print("TIME MIN:", estimated_time_min)
-        print("RISK SCORE:", risk_score)
+        print("ROUTE FOUND")
+        print("DISTANCE:", distance_km)
+        print("TIME:", estimated_time_min)
+        print("RISK:", risk_score)
+        print("RISK EDGES:", len(risk_edges))
         print("===================================")
 
-        # =================================
+        # =========================================
         # RESPONSE
-        # =================================
+        # =========================================
 
         return {
 
@@ -826,7 +811,7 @@ for edge_u, edge_v, edge_attr in R_dynamic.edges(data=True):
             "risk_beta": req.risk,
 
             "message":
-                f"Safe route generated "
+                f"Flood-aware safe route generated "
                 f"using {req.model}",
         }
 
