@@ -727,35 +727,52 @@ def predict_route(req: RouteRequest):
                 penalty
             )
 
-            # =================================
-            # HIGH RISK ROADS
-            # =================================
+          # =================================
+# ALL FLOOD RISK ROADS
+# =================================
 
-            if penalty > 0.2:
+risk_edges = []
 
-                if (
-                    u in osmid_to_latlon
-                    and v in osmid_to_latlon
-                ):
+for edge_u, edge_v, edge_attr in R_dynamic.edges(data=True):
 
-                    risk_edges.append([
-                        [
-                            float(
-                                osmid_to_latlon[u][0]
-                            ),
-                            float(
-                                osmid_to_latlon[u][1]
-                            ),
-                        ],
-                        [
-                            float(
-                                osmid_to_latlon[v][0]
-                            ),
-                            float(
-                                osmid_to_latlon[v][1]
-                            ),
-                        ],
-                    ])
+    try:
+
+        edge_penalty = float(
+            edge_attr.get(
+                "planned_penalty",
+                0.0,
+            )
+        )
+
+        # show roads with moderate/high risk
+        if edge_penalty > 0.15:
+
+            if (
+                edge_u in osmid_to_latlon
+                and edge_v in osmid_to_latlon
+            ):
+
+                risk_edges.append([
+                    [
+                        float(
+                            osmid_to_latlon[edge_u][0]
+                        ),
+                        float(
+                            osmid_to_latlon[edge_u][1]
+                        ),
+                    ],
+                    [
+                        float(
+                            osmid_to_latlon[edge_v][0]
+                        ),
+                        float(
+                            osmid_to_latlon[edge_v][1]
+                        ),
+                    ],
+                ])
+
+    except:
+        continue
 
         # =================================
         # FINAL RISK SCORE
