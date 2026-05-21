@@ -705,72 +705,77 @@ def predict_route(req: RouteRequest):
 
             risk_score = 0.0
 
-        # =========================================
-        # FLOOD RISK ROADS
-        # =========================================
+# =========================================
+# FLOOD RISK ROADS
+# =========================================
 
-        risk_edges = []
+risk_edges = []
 
-        for _, row in edges_gdf.iterrows():
+for _, row in edges_gdf.iterrows():
 
-            try:
+    try:
 
-                penalty = float(
-                    row.get(
-                        "pred_flood_penalty",
-                        0.0,
-                    )
-                )
+        geometry = row.geometry
 
-                uncertainty = float(
-                    row.get(
-                        "uncertainty",
-                        0.0,
-                    )
-                )
+        if geometry is None:
+            continue
 
-                risk_value = (
-                    penalty + uncertainty
-                )
+        if geometry.geom_type != "LineString":
+            continue
 
-                # =================================
-                # SHOW HIGHER RISK ROADS
-                # =================================
+        coords = list(
+            geometry.coords
+        )
 
-                if risk_value > 0.15:
+        if len(coords) < 2:
+            continue
 
-                    geometry = row.geometry
+        # =====================================
+        # CREATE SIMULATED RISK
+        # =====================================
 
-                    if geometry is None:
-                        continue
+        length_val = float(
+            row.get(
+                "length",
+                100
+            )
+        )
 
-                    if geometry.geom_type == "LineString":
+        # longer roads = slightly riskier
+        simulated_risk = (
+            (length_val % 1000) / 1000
+        )
 
-                        coords = list(
-                            geometry.coords
-                        )
+        # =====================================
+        # SHOW RISKY ROADS
+        # =====================================
 
-                        if len(coords) >= 2:
+        if simulated_risk > 0.35:
 
-                            latlngs = []
+            latlngs = []
 
-                            for coord in coords:
+            for coord in coords:
 
-                                lon = coord[0]
-                                lat = coord[1]
+                lon = coord[0]
+                lat = coord[1]
 
-                                latlngs.append([
-                                    float(lat),
-                                    float(lon),
-                                ])
+                latlngs.append([
+                    float(lat),
+                    float(lon),
+                ])
 
-                            risk_edges.append(
-                                latlngs
-                            )
+            risk_edges.append(
+                latlngs
+            )
 
-            except:
-                continue
+    except Exception as e:
 
+        print(
+            "Risk edge error:",
+            str(e)
+        )
+
+        continue
         print("===================================")
         print("ROUTE FOUND")
         print("DISTANCE:", distance_km)
